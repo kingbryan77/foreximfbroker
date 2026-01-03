@@ -9,7 +9,7 @@ const mapProfileToUser = (profile: any, authUser: any): User => {
     username: profile.username || '',
     phoneNumber: profile.phone_number || '',
     isAdmin: profile.is_admin || false,
-    isVerified: profile.is_verified || true, // Default to true for better UI feel
+    isVerified: profile.is_verified || true, 
     balance: profile.balance || 0,
     notifications: [], 
     profilePictureUrl: profile.profile_picture_url,
@@ -32,7 +32,7 @@ export const register = async (userData: Omit<User, 'id' | 'username' | 'isAdmin
     if (!authData.user) return { user: null, error: 'Gagal membuat akun.' };
 
     // Tunggu sejenak agar trigger SQL selesai membuat record di tabel profiles
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 1000));
 
     const { data: profileData } = await supabase
       .from('profiles')
@@ -53,20 +53,39 @@ export const login = async (identifier: string, passwordAttempt: string): Promis
       password: passwordAttempt,
     });
 
-    if (authError) return { user: null, error: authError.message };
+    if (authError) {
+      if (authError.message.includes('Email not confirmed')) {
+        return { user: null, error: 'Email belum dikonfirmasi. Harap matikan pengaturan "Confirm Email" di Dashboard Supabase Anda.' };
+      }
+      return { user: null, error: 'Email atau Password salah.' };
+    }
+
     if (!authData.user) return { user: null, error: 'User tidak ditemukan.' };
 
-    const { data: profileData, error: profileError } = await supabase
+    // Percobaan ambil profil dengan sedikit delay jika gagal pertama kali
+    let profileResponse = await supabase
       .from('profiles')
       .select('*')
       .eq('id', authData.user.id)
       .single();
 
-    if (profileError) return { user: null, error: 'Profil gagal dimuat.' };
+    if (profileResponse.error) {
+       // Coba sekali lagi setelah 1 detik (antisipasi delay trigger)
+       await new Promise(r => setTimeout(r, 1000));
+       profileResponse = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', authData.user.id)
+          .single();
+    }
 
-    return { user: mapProfileToUser(profileData, authData.user), error: null };
+    if (profileResponse.error) {
+        return { user: null, error: 'Data profil belum siap. Silakan coba login kembali dalam beberapa saat.' };
+    }
+
+    return { user: mapProfileToUser(profileResponse.data, authData.user), error: null };
   } catch (e: any) {
-    return { user: null, error: e.message };
+    return { user: null, error: 'Terjadi kesalahan pada server.' };
   }
 };
 
@@ -144,13 +163,13 @@ export const adminCreateUser = async (userData: Omit<User, 'id' | 'username' | '
     
     if (authError || !authData.user) throw authError;
 
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 1200));
 
     const { data: profileData, error: updateError } = await supabase
         .from('profiles')
         .update({ 
             is_admin: userData.isAdmin || false, 
-            is_verified: true, // Auto verify for admin created users too
+            is_verified: true, 
             balance: userData.balance || 0,
             phone_number: userData.phoneNumber || ''
         })
